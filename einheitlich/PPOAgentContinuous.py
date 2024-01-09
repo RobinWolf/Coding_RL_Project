@@ -57,6 +57,7 @@ class PPOAgentContinuous:
             advantage = q_value - value
             loss = tf.reduce_mean(tf.square(advantage))
         gradients = tape.gradient(loss, self.critic.trainable_variables)
+        gradients = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients]  
         return gradients, loss, advantage
     
  # *************************************************MODIFIED**************************************************     
@@ -75,7 +76,7 @@ class PPOAgentContinuous:
             p_old = normal_dist_old.prob(actions)
 
             # calculate the ratio to weight the advantage estimate from the critic network (value-based)
-            ratio = p_current / p_old  #p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
+            ratio = p_current / p_old  # p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
 # ***********************************************************************************************************     
 
             clip_ratio = tf.clip_by_value(ratio, 1-self.epsilon, 1+self.epsilon)
@@ -86,6 +87,7 @@ class PPOAgentContinuous:
             clip_objective = clip_ratio * advantage
             loss = -tf.reduce_mean(tf.where(objective < clip_objective, objective, clip_objective))
         gradients = tape.gradient(loss, self.actor.trainable_variables)
+        gradients = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients]  # try to prevent training instability
         return gradients, loss
         
 
@@ -95,6 +97,8 @@ class PPOAgentContinuous:
         
         self.critic_optimizer.apply_gradients(zip(critic_grads, self.critic.trainable_variables))
         self.actor_optimizer.apply_gradients(zip(actor_grads, self.actor.trainable_variables))
+        #print('##Actor Weights', self.actor.get_weights())
+
         return actor_loss, critic_loss
     
     def update_frozen_nets(self):
