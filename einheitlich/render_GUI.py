@@ -1,11 +1,10 @@
 # Function to render an agent in a specific gym enviroment in external GUI -> not so laggy like matplotlib implementation
 import numpy as np
 
-def render_GUI(render_env, render_agent, filepath_actor, filepath_critic):
+def render_GUI(render_env, render_agent):
 
-    render_agent.load_models(filepath_actor, filepath_critic)
-    render_agent._init_networks()
-    render_obs,_ = render_env.reset()
+    # Reset the enviroment and get the initial observation
+    render_obs = render_env.reset()
 
     # Start rendering in pyglet GUI (internal gym method which uses pyglet inthe background)
     render_env.render()
@@ -15,12 +14,12 @@ def render_GUI(render_env, render_agent, filepath_actor, filepath_critic):
     try:
         while True:
             render_action = render_agent.act(np.array([render_obs]))
-            _, _, termination, truncation, _ = render_env.step(render_action)
+            render_obs, _, termination, truncation, _ = render_env.step(render_action)
 
             if termination or truncation:
                 print(f'Episode {episode} finished')
                 episode += 1
-                render_obs,_ = render_env.reset()
+                render_obs = render_env.reset()
 
     except KeyboardInterrupt as e:
         print('Closed Rendering sucessful')

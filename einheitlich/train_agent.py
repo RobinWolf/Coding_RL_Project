@@ -26,7 +26,7 @@ def training_rollouts(env, agent, log_dir, epochs = 100, n_rollouts = 5, batch_s
 
             while not done:
                 #env.render()    # call gui if render_mode = 'human'
-                action = agent.act(np.array([obs]))
+                action = agent.act(np.array(obs))
                 new_obs, revard, termination, truncation, _ = env.step(action)
                 if termination:
                     terminations += 1
@@ -48,6 +48,7 @@ def training_rollouts(env, agent, log_dir, epochs = 100, n_rollouts = 5, batch_s
                     plt.imshow(env.render())
                     plt.show()
                     print("done = ", done)
+                    print("action = ", action)
                     print("total_timesteps = ", total_timesteps)
                     print("rollout = ", rollout)
                     print("epoch = ", epoch)
@@ -84,7 +85,8 @@ def training_rollouts(env, agent, log_dir, epochs = 100, n_rollouts = 5, batch_s
                                                     rewards_batch,
                                                     next_states_batch,
                                                     dones_batch)
-            print(f'update online nets, learn step {learn_step} of {learn_steps} finished')
+            print(f'update online nets, learn step {learn_step} of {learn_steps} finished --> actor loss {actor_loss}, critic loss {critic_loss}')
+
 
         agent.update_frozen_nets()
         print(f'update frozen nets, epoche {epoch} of {epochs} finished')
@@ -164,6 +166,12 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
                     print("rollout = ", rollout)
                     print("epoch = ", epoch)
         
+        # normalize states and next_states (observations) --> especially for hopper we need to deal with infinite observation spaces!
+        obs_mean = np.mean(states, axis=0, keepdims=True)
+        obs_std = np.std(states, axis=0, keepdims=True)
+        states = (states - obs_mean) / (obs_std + 1e-8) # add 1e-8 for numerical stability
+        next_states = (next_states - obs_mean) / (obs_std + 1e-8)  # both normalized with the same mean and std -> common practice in machine learning
+
         # store colledted experience for all rollouts/ episodes and reset enviroment for next episode/ rollout
         states, actions, rewards, next_states, dones = map(np.array, [states, actions, rewards, next_states, dones])
         #obs, _ = env.reset() # TODO kann weg weil in der schleife oben schon resetet wird?
@@ -196,7 +204,7 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
                                                     rewards_batch,
                                                     next_states_batch,
                                                     dones_batch)
-            print(f'update online nets, learn step {learn_step} of {learn_steps} finished')
+            print(f'update online nets, learn step {learn_step} of {learn_steps} finished --> actor loss {actor_loss}, critic loss {critic_loss}')
 
         agent.update_frozen_nets()
         print(f'update frozen nets, epoche {epoch} of {epochs} finished')

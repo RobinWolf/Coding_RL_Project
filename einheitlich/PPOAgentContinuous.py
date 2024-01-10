@@ -14,6 +14,7 @@ class PPOAgentContinuous:
         self.action_shape = action_space.shape[0]
         self.actor = Actor(n_actions=self.action_shape)
         self.actor_old = Actor(n_actions=self.action_shape)
+        print('action_shape bzw. Actor Outputs',self.action_shape)
 # ***********************************************************************************************************     
 
         self.critic = Critic()
@@ -37,12 +38,18 @@ class PPOAgentContinuous:
 
  # *************************************************MODIFIED**************************************************     
     def act(self, observation):
-        mean_tensor, log_std_tensor = self.actor(observation) # Actor network will output the gaussian probability distribution of actions for the given observation-state
-        mean = tf.gather(mean_tensor, indices= 0, axis=1).numpy()
-        std = tf.gather(tf.exp(log_std_tensor), indices= 0, axis=1).numpy()
-        #print('mean', mean, 'std', std)
-        action = np.random.normal(size = self.action_shape, loc = mean, scale = std)  # modify sampling method to sample random actions in respect a continous normal distribution
-        #print('Choosen Action:', action)
+        # experiment with tensorflow variables (consistency!)
+        means_current, log_stds_current = self.actor(observation)    # mean and log tensors shape(batchsize,1) wit batchsize = len(states)
+        normal_dist = tfp.distributions.Normal(loc=means_current, scale=tf.exp(log_stds_current))
+        action_tf = normal_dist.sample()    # this introduces exploration to the agent -> sampling from stochastic policy!
+        action = action_tf.numpy()[0]   # reduce shape (1,3) to (3,)
+        # do calculations with numpy: faster and no backprob of the variables is needed
+        # mean_tensor, log_std_tensor = self.actor(observation) # Actor network will output the gaussian probability distribution of actions for the given observation-state
+        # mean = tf.gather(mean_tensor, indices= 0, axis=1).numpy()
+        # std = tf.gather(tf.exp(log_std_tensor), indices= 0, axis=1).numpy()
+        # #print('mean', mean, 'std', std)
+        # action = np.random.normal(size = self.action_shape, loc = mean, scale = std)  # modify sampling method to sample random actions in respect a continous normal distribution
+        # print('Choosen Action:', action)
         return action
         # in continous action space this output should be a real number (optional clipped [-1,1])
         # for mnt car = force applied on the car (clipped [-1,1]) and * power od 0.0015 -> no custom action clipping necessary
@@ -63,10 +70,10 @@ class PPOAgentContinuous:
  # *************************************************MODIFIED**************************************************     
     def get_actor_grads(self, states, actions, advantage):  # parameters are updated to maximize the expected cumulative reward, incorporating feedback from the critic
         with tf.GradientTape() as tape:
+            # do calculations with tf-tensors because backprob is needed (consistency in used framework)
             # get distribution from current policy (used to sample/ explore in enviroment)
             means_current, log_stds_current = self.actor(states)    # mean and log tensors shape(batchsize,1) wit batchsize = len(states)
             normal_dist_current = tfp.distributions.Normal(loc=means_current, scale=tf.exp(log_stds_current))
-            # sample made actions from the approximated current distribution -> introduces more exploration in the action space by sampling specific actions rather than the whole distribution (mean and std)
             p_current = normal_dist_current.prob(actions)
             
             # get distribution from old policy (used to evaluate current policy in ratio)
@@ -76,7 +83,7 @@ class PPOAgentContinuous:
             p_old = normal_dist_old.prob(actions)
 
             # calculate the ratio to weight the advantage estimate from the critic network (value-based)
-            ratio = p_current / p_old  # p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
+            ratio = p_current / (p_old + 1e-8)  # p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
 # ***********************************************************************************************************     
 
             clip_ratio = tf.clip_by_value(ratio, 1-self.epsilon, 1+self.epsilon)
