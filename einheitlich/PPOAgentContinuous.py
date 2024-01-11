@@ -11,6 +11,7 @@ class PPOAgentContinuous:
         self.epsilon = epsilon
         self.observation_shape = observation_space.shape[0]
 # *************************************************MODIFIED**************************************************     
+        self.action_space = action_space
         self.action_shape = action_space.shape[0]
         self.actor = Actor(n_actions=self.action_shape)
         self.actor_old = Actor(n_actions=self.action_shape)
@@ -43,6 +44,7 @@ class PPOAgentContinuous:
         normal_dist = tfp.distributions.Normal(loc=means_current, scale=tf.exp(log_stds_current))
         action_tf = normal_dist.sample()    # this introduces exploration to the agent -> sampling from stochastic policy!
         action = action_tf.numpy()[0]   # reduce shape (1,3) to (3,)
+        clip_action = np.clip(action, self.action_space.low, self.action_space.high)
         # do calculations with numpy: faster and no backprob of the variables is needed
         # mean_tensor, log_std_tensor = self.actor(observation) # Actor network will output the gaussian probability distribution of actions for the given observation-state
         # mean = tf.gather(mean_tensor, indices= 0, axis=1).numpy()
@@ -50,7 +52,7 @@ class PPOAgentContinuous:
         # #print('mean', mean, 'std', std)
         # action = np.random.normal(size = self.action_shape, loc = mean, scale = std)  # modify sampling method to sample random actions in respect a continous normal distribution
         # print('Choosen Action:', action)
-        return action
+        return clip_action
         # in continous action space this output should be a real number (optional clipped [-1,1])
         # for mnt car = force applied on the car (clipped [-1,1]) and * power od 0.0015 -> no custom action clipping necessary
  # ***********************************************************************************************************     
@@ -74,16 +76,17 @@ class PPOAgentContinuous:
             # get distribution from current policy (used to sample/ explore in enviroment)
             means_current, log_stds_current = self.actor(states)    # mean and log tensors shape(batchsize,1) wit batchsize = len(states)
             normal_dist_current = tfp.distributions.Normal(loc=means_current, scale=tf.exp(log_stds_current))
-            p_current = normal_dist_current.prob(actions)
+            p_current = normal_dist_current.log_prob(actions)
             
             # get distribution from old policy (used to evaluate current policy in ratio)
             means_old, log_stds_old = self.actor_old(states)    # mean and log tensors shape(batchsize,1) wit batchsize = len(states)
             normal_dist_old = tfp.distributions.Normal(loc=means_old, scale=tf.exp(log_stds_old))
             # sample random actions from the approximated current distribution -> introduces more exploration in the action space by sampling actions rather than selecting the mean directly
-            p_old = normal_dist_old.prob(actions)
+            p_old = normal_dist_old.log_prob(actions)
 
             # calculate the ratio to weight the advantage estimate from the critic network (value-based)
-            ratio = p_current / (p_old + 1e-8)  # p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
+            # ratio = p_current / (p_old + 1e-8)  # p_current, p_old, ratio tensors of shape(batchsize, batchsize, 1) -> like discrete implementation
+            ratio = tf.exp(p_current - p_old)
 # ***********************************************************************************************************     
 
             clip_ratio = tf.clip_by_value(ratio, 1-self.epsilon, 1+self.epsilon)
@@ -94,7 +97,7 @@ class PPOAgentContinuous:
             clip_objective = clip_ratio * advantage
             loss = -tf.reduce_mean(tf.where(objective < clip_objective, objective, clip_objective))
         gradients = tape.gradient(loss, self.actor.trainable_variables)
-        gradients = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients]  # try to prevent training instability
+        # gradients = [tf.clip_by_value(grad, -1.0, 1.0) for grad in gradients]  # try to prevent training instability
         return gradients, loss
         
 

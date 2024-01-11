@@ -53,6 +53,16 @@ def training_rollouts(env, agent, log_dir, epochs = 100, n_rollouts = 5, batch_s
                     print("rollout = ", rollout)
                     print("epoch = ", epoch)
         
+        # normalize states and next_states (observations) --> especially for hopper we need to deal with infinite observation spaces!
+        # normalization should be consistent over the whole epoch            
+        obs_mean = np.mean(states, axis=0, keepdims=True)
+        obs_std = np.std(states, axis=0, keepdims=True)
+        r_mean = np.mean(rewards, axis=0, keepdims=True)
+        r_std = np.std(rewards, axis=0, keepdims=True)
+        states = (states - obs_mean) / (obs_std + 1e-8) # add 1e-8 for numerical stability
+        next_states = (next_states - obs_mean) / (obs_std + 1e-8)  # both normalized with the same mean and std -> common practice in machine learning
+        rewards = (rewards - r_mean) / (r_std + 1e-8)
+        
         # store colledted experience for all rollouts/ episodes and reset enviroment for next episode/ rollout
         states, actions, rewards, next_states, dones = map(np.array, [states, actions, rewards, next_states, dones])
         #obs, _ = env.reset() # TODO kann weg weil in der schleife oben schon resetet wird?
@@ -140,7 +150,9 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
             while not done:
                 #env.render()    # call gui if render_mode = 'human'
                 action = agent.act(np.array([obs]))
-                new_obs, revard, termination, truncation, _ = env.step(action)
+                noise = np.random.normal(0, scale = 0.005, size=action.shape)
+                noisy_action = action + noise
+                new_obs, revard, termination, truncation, _ = env.step(noisy_action)
                 if termination:
                     terminations += 1
                 if termination or truncation:
@@ -156,21 +168,27 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
                 total_timesteps += 1
                 steps += 1
 
-                if render:
-                    clear_output(wait=True)
-                    plt.axis('off')
-                    plt.imshow(env.render())
-                    plt.show()
-                    print("done = ", done)
-                    print("total_timesteps = ", total_timesteps)
-                    print("rollout = ", rollout)
-                    print("epoch = ", epoch)
+                # if render:
+                #     clear_output(wait=True)
+                #     plt.axis('off')
+                #     plt.imshow(env.render())
+                #     plt.show()
+                #     print("done = ", done)
+                #     print("action = ", action)
+                #     print("reward = ", revard)
+                #     print("total_timesteps = ", total_timesteps)
+                #     print("rollout = ", rollout)
+                #     print("epoch = ", epoch)
         
         # normalize states and next_states (observations) --> especially for hopper we need to deal with infinite observation spaces!
+        # normalization should be consistent over the whole epoch            
         obs_mean = np.mean(states, axis=0, keepdims=True)
         obs_std = np.std(states, axis=0, keepdims=True)
+        r_mean = np.mean(rewards, axis=0, keepdims=True)
+        r_std = np.std(rewards, axis=0, keepdims=True)
         states = (states - obs_mean) / (obs_std + 1e-8) # add 1e-8 for numerical stability
         next_states = (next_states - obs_mean) / (obs_std + 1e-8)  # both normalized with the same mean and std -> common practice in machine learning
+        rewards = (rewards - r_mean) / (r_std + 1e-8)
 
         # store colledted experience for all rollouts/ episodes and reset enviroment for next episode/ rollout
         states, actions, rewards, next_states, dones = map(np.array, [states, actions, rewards, next_states, dones])
@@ -209,12 +227,34 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
         agent.update_frozen_nets()
         print(f'update frozen nets, epoche {epoch} of {epochs} finished')
 
-        avg_epoch_return = np.sum(rewards)/rollout
+        cumm_epoch_return = np.sum(rewards)
         sum_epoch_terminations = terminations
         
         #do some more prints for analyzing the model behavior while training
-        print(f'===> epoch {epoch + 1}, total_timesteps {total_timesteps}, actor loss {actor_loss}, critic loss {critic_loss}, avg_epoch_return {avg_epoch_return}, sum_epoch_terminations {sum_epoch_terminations}')
+        print(f'===> epoch {epoch + 1}, total_timesteps {total_timesteps}, actor loss {actor_loss}, critic loss {critic_loss}, cumm_epoch_return {cumm_epoch_return}, sum_epoch_terminations {sum_epoch_terminations}')
         
+        
+        obs, _ = env.reset()
+        done = False 
+        _return = 0
+
+        while not done:
+            #env.render()    # call gui if render_mode = 'human'
+            action = agent.act(np.array([obs]))
+            new_obs, revard, termination, truncation, _ = env.step(action)
+
+            obs = new_obs
+            _return += revard
+
+            if render:
+                clear_output(wait=True)
+                plt.axis('off')
+                plt.imshow(env.render())
+                plt.show()
+            if termination or truncation:
+                done = True
+        print("reward = ", _return)
+
         # Log metrics at the end of each epoch to tensorboard
         log_metrics(summary_writer = summary_writer,
                     epoch = epoch, 
@@ -222,7 +262,7 @@ def training_steps(env, agent, log_dir, epochs = 100, n_steps = 2048, batch_size
                     total_timesteps = total_timesteps,
                     critic_loss = critic_loss, 
                     actor_loss= actor_loss,
-                    avg_epoch_return = avg_epoch_return,
+                    avg_epoch_return = cumm_epoch_return,
                     actor_learning_rate = agent.actor_learning_rate, 
                     critic_learning_rate = agent.critic_learning_rate,
                     epsilon = agent.epsilon, 
